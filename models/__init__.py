@@ -11,18 +11,20 @@ import torch
 from .backbone import build_backbone
 from .deformable_detr import DeformableDETR, SetCriterion as DefSetCriterion, PostProcess as DefPostProcess
 from .detr import DETR, SetCriterion as DETRSetCriterion, PostProcess as DETRPostProcess
+from .dab_detr import SetCriterion as DABSetCriterion, PostProcess as DABPostProcess
 from .def_matcher import build_matcher as build_def_matcher
 from .detr_matcher import build_matcher as build_detr_matcher
+from .dab_matcher import build_matcher as build_dab_matcher
 from .segmentation import (DETRsegm, PostProcessPanoptic, PostProcessSegm,
                            dice_loss, sigmoid_focal_loss)
 from .deformable_transformer import build_deforamble_transformer
-
+from .dab_transformer import build_dab_transformer
 from .transformer import build_transformer
 
 
 def build_model(args):
     if args.dataset_file == 'coco':
-        num_classes = 90
+        num_classes = 2
     elif args.dataset_file == 'coco_panoptic':
         num_classes = 250
     elif args.dataset_file == 'airbus':
@@ -77,7 +79,6 @@ def build_model(args):
         matcher = build_def_matcher(args)
         criterion = DefSetCriterion(num_classes, matcher, weight_dict, losses, focal_alpha=args.focal_alpha)
         postprocessors = {'bbox': DefPostProcess()}
-
     elif args.model == 'detr':
         transformer = build_transformer(args)
         model = DETR(
@@ -93,6 +94,21 @@ def build_model(args):
         criterion = DETRSetCriterion(num_classes, matcher, weight_dict, args.eos_coef,
                                      losses, object_embedding_loss=args.object_embedding_loss)
         postprocessors = {'bbox': DETRPostProcess()}
+    elif args.model == 'dab-detr':
+        transformer = build_dab_transformer(args)
+        model = DETR(
+            backbone,
+            transformer,
+            num_classes=num_classes,
+            num_queries=args.num_queries,
+            aux_loss=args.aux_loss,
+            object_embedding_loss=args.object_embedding_loss,
+            obj_embedding_head=args.obj_embedding_head
+        )
+        matcher = build_dab_matcher(args)
+        criterion = DABSetCriterion(num_classes, matcher, weight_dict, args.eos_coef,
+                                     losses, object_embedding_loss=args.object_embedding_loss)
+        postprocessors = {'bbox': DABPostProcess()}
     else:
         raise ValueError("Wrong model.")
 

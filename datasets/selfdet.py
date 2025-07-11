@@ -10,7 +10,10 @@ import os
 from PIL import Image
 import torch
 import numpy as np
+import sys
+sys.path.append('/root/fssd/test/DETReg')
 import datasets.transforms as T
+
 from torchvision.transforms import transforms
 from PIL import ImageFilter
 import random
@@ -40,7 +43,7 @@ class SelfDet(Dataset):
     The format of the bounding box is same to COCO.
     """
 
-    def __init__(self, root, detection_transform, query_transform, cache_dir=None, max_prop=30, strategy='topk'):
+    def __init__(self, root, detection_transform, query_transform, cache_dir='/fssd/cache_dir', max_prop=30, strategy='topk'):
         super(SelfDet, self).__init__()
         self.strategy = strategy
         self.cache_dir = cache_dir
@@ -69,52 +72,47 @@ class SelfDet(Dataset):
         img = Image.open(img_path).convert("RGB")
         w, h = img.size
 
-        if self.strategy == 'topk': # selective search has randomness and without caching, the results are better.
-            boxes = selective_search(img, h, w, res_size=128)
-            boxes = boxes[:self.max_prop]
-        elif self.strategy == 'mc':
-            boxes = self.load_from_cache(item, img, h, w)
-            boxes_indicators = np.where(np.random.binomial(1, p=self.dist2[:len(boxes)]))[0]
-            boxes = boxes[boxes_indicators]
-        elif self.strategy == "random":
-            boxes = self.load_from_cache(random.choice(range(self.files)), None, None, None) # relies on cache for now
-            boxes = boxes[:self.max_prop]
-        else:
-            raise ValueError("No such strategy")
-
-        # # uncomment for debug: visualize image and patches
-        # from util.plot_utils import plot_results
-        # from matplotlib import pyplot as plt
-        # plt.figure()
-        # boxes = selective_search(img, h, w, res_size=128)
-        # plot_results(np.array(img), np.zeros(10), boxes[:10], plt.gca(), norm=False)
-        # plt.show()
+        # 从缓存加载或计算并保存
+        boxes = self.load_from_cache(item, img, h, w)
 
         if len(boxes) < 2:
             return self.__getitem__(random.randint(0, len(self.files) - 1))
 
         patches = [img.crop([b[0], b[1], b[2], b[3]]) for b in boxes]
-        target = {'orig_size': torch.as_tensor([int(h), int(w)]), 'size': torch.as_tensor([int(h), int(w)])}
+        target = {
+            'orig_size': torch.as_tensor([int(h), int(w)]),
+            'size': torch.as_tensor([int(h), int(w)])
+        }
         target['patches'] = torch.stack([self.query_transform(p) for p in patches], dim=0)
         target['boxes'] = torch.tensor(boxes)
         target['iscrowd'] = torch.zeros(len(target['boxes']))
         target['area'] = target['boxes'][..., 2] * target['boxes'][..., 3]
         target['labels'] = torch.ones(len(target['boxes'])).long()
+
         img, target = self.detection_transform(img, target)
+
         if len(target['boxes']) < 2:
             return self.__getitem__(random.randint(0, len(self.files) - 1))
+
         return img, target
 
     def load_from_cache(self, item, img, h, w):
+        # 构建缓存文件名
         fn = self.files[item].split('/')[-1].split('.')[0] + '.npy'
         fp = os.path.join(self.cache_dir, fn)
+
         try:
+            # 如果缓存存在，直接加载
             with open(fp, 'rb') as f:
                 boxes = np.load(f)
+            boxes=boxes[:self.max_prop]
         except FileNotFoundError:
-            boxes = selective_search(img, h, w, res_size=None)
+            # 否则运行 selective search 并保存
+            boxes = selective_search(img, h, w, res_size=128)
+            # 只保留前 max_prop 个提议
             with open(fp, 'wb') as f:
                 np.save(f, boxes)
+            boxes = boxes[:self.max_prop]
         return boxes
 
 def selective_search(img, h, w, res_size=128):
@@ -210,3 +208,59 @@ def get_query_transforms(image_set):
 def build_selfdet(image_set, args, p):
     return SelfDet(p, detection_transform=make_self_det_transforms(image_set), query_transform=get_query_transforms(image_set), cache_dir=args.cache_path,
                    max_prop=args.max_prop, strategy=args.strategy)
+
+
+if __name__ == '__main__':
+    import argparse
+    import os
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+    from tqdm import tqdm
+
+    parser = argparse.ArgumentParser(description='Generate cache for SelfDet dataset')
+    parser.add_argument('--root', type=str, required=True, help='Path to image folder')
+    parser.add_argument('--cache_dir', type=str, required=True, help='Directory to save/cache boxes')
+    parser.add_argument('--max_prop', type=int, default=30, help='Max number of proposals per image (topk)')
+    parser.add_argument('--strategy', type=str, default='topk', choices=['topk', 'mc', 'random'],
+                        help='Strategy for selecting patches')
+    parser.add_argument('--workers', type=int, default=multiprocessing.cpu_count(),
+                        help='Number of processes for caching')
+
+    args = parser.parse_args()
+
+    # 创建 SelfDet 数据集实例（只用于获取文件列表）
+    dummy_dataset = SelfDet(
+        root=args.root,
+        detection_transform=None,  # 不需要 transform
+        query_transform=None,
+        cache_dir=args.cache_dir,
+        max_prop=args.max_prop,
+        strategy=args.strategy
+    )
+
+    print(f"Start caching boxes for {len(dummy_dataset)} images using {args.workers} processes...")
+
+    def process_index(i):
+        img_path = dummy_dataset.files[i]
+        fn = os.path.basename(img_path).split('.')[0] + '.npy'
+        fp = os.path.join(args.cache_dir, fn)
+
+        if os.path.exists(fp):  # 跳过已有缓存
+            return
+
+        try:
+            img = Image.open(img_path).convert("RGB")
+            w, h = img.size
+            boxes = selective_search(img, h, w, res_size=128)
+            boxes = boxes[:args.max_prop]
+
+            with open(fp, 'wb') as f:
+                np.save(f, boxes)
+        except Exception as e:
+            print(f"Error processing index {i}: {e}")
+
+    # 使用 ProcessPoolExecutor 多进程处理，并结合 tqdm 展示进度
+    with ProcessPoolExecutor(max_workers=args.workers) as executor:
+        list(tqdm(executor.map(process_index, range(len(dummy_dataset))), total=len(dummy_dataset)))
+
+    print("Caching completed.")

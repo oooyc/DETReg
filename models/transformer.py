@@ -293,6 +293,7 @@ def build_transformer(args):
     )
 
 
+
 def _get_activation_fn(activation):
     """Return an activation function given a string"""
     if activation == "relu":
