@@ -135,7 +135,7 @@ def selective_search(img, h, w, res_size=128):
     return boxes
 
 
-def make_self_det_transforms(image_set):
+def make_self_det_transforms(image_set, model='detr'):
     normalize = T.Compose([
         T.ToTensor(),
         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -145,7 +145,7 @@ def make_self_det_transforms(image_set):
     scales = [320, 336, 352, 368, 400, 416, 432, 448, 464, 480]
 
     if image_set == 'train':
-        return T.Compose([
+        transforms_list = [
             T.RandomHorizontalFlip(),
             T.RandomSelect(
                 T.RandomResize(scales, max_size=600),
@@ -155,14 +155,25 @@ def make_self_det_transforms(image_set):
                     T.RandomResize(scales, max_size=600),
                 ])
             ),
-            normalize,
-        ])
+        ]
+        
+        # For RT-DETR: add final fixed resize to (640, 640)
+        if model == 'rt_detr':
+            transforms_list.append(T.Resize((640, 640)))
 
-    if image_set == 'val':
-        return T.Compose([
-            T.RandomResize([480], max_size=600),
-            normalize,
-        ])
+        transforms_list.append(normalize)
+
+        return T.Compose(transforms_list)
+
+    elif image_set == 'val':
+        transforms_list = []
+
+        # For RT-DETR: use fixed resize to (640, 640)
+        transforms_list.append(T.RandomResize([480], max_size=600))
+
+        transforms_list.append(normalize)
+
+        return T.Compose(transforms_list)
 
     raise ValueError(f'unknown {image_set}')
 
@@ -206,7 +217,7 @@ def get_query_transforms(image_set):
 
 
 def build_selfdet(image_set, args, p):
-    return SelfDet(p, detection_transform=make_self_det_transforms(image_set), query_transform=get_query_transforms(image_set), cache_dir=args.cache_path,
+    return SelfDet(p, detection_transform=make_self_det_transforms(image_set, args.model), query_transform=get_query_transforms(image_set), cache_dir=args.cache_path,
                    max_prop=args.max_prop, strategy=args.strategy)
 
 

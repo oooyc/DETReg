@@ -15,8 +15,6 @@ from .utils import deformable_attention_core_func, get_activation, inverse_sigmo
 from .utils import bias_init_with_prob
 
 
-
-
 class MLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers, act='relu'):
         super().__init__()
@@ -270,7 +268,7 @@ class TransformerDecoder(nn.Module):
             ref_points_detach = inter_ref_bbox.detach(
             ) if self.training else inter_ref_bbox
 
-        return torch.stack(dec_out_bboxes), torch.stack(dec_out_logits)
+        return torch.stack(dec_out_bboxes), torch.stack(dec_out_logits), output
 
 
 class RTDETRTransformer(nn.Module):
@@ -530,7 +528,7 @@ class RTDETRTransformer(nn.Module):
             self._get_decoder_input(memory, spatial_shapes, denoising_class, denoising_bbox_unact)
 
         # decoder
-        out_bboxes, out_logits = self.decoder(
+        out_bboxes, out_logits, last_hs = self.decoder(
             target,
             init_ref_points_unact,
             memory,
@@ -555,7 +553,7 @@ class RTDETRTransformer(nn.Module):
                 out['dn_aux_outputs'] = self._set_aux_loss(dn_out_logits, dn_out_bboxes)
                 out['dn_meta'] = dn_meta
 
-        return out
+        return out, last_hs
 
 
     @torch.jit.unused
@@ -565,3 +563,49 @@ class RTDETRTransformer(nn.Module):
         # as a dict having both a Tensor and a list.
         return [{'pred_logits': a, 'pred_boxes': b}
                 for a, b in zip(outputs_class, outputs_coord)]
+
+
+def build_decoder(# hidden_dim: int = 256,
+                    hidden_dim: int = 256,
+                    position_embed_type: str = 'sine',
+                    feat_channels: list = [256, 256, 256],
+                    feat_strides = [8, 16, 32],
+                    num_levels: int = 3,
+                    num_decoder_points: int = 4,
+                    nhead: int = 8,
+                    num_decoder_layers: int = 6,
+                    dim_feedforward: int = 1024,
+                    dropout: float = 0,
+                    activation: str = "relu",
+                    num_denoising: int = 100,
+                    label_noise_ratio: float = 0.5,
+                    box_noise_scale: float = 1,
+                    learnt_init_query: bool = False,
+                    eval_spatial_size: list = [640, 640],
+                    eval_idx: int = -1,
+                    eps: float = 0.01,
+                    aux_loss: bool = True,
+                    ):
+    return RTDETRTransformer(
+        num_classes=2,
+        hidden_dim=hidden_dim,
+        num_queries=300,
+        position_embed_type=position_embed_type,
+        feat_channels=feat_channels,
+        feat_strides=feat_strides,
+        num_levels=num_levels,
+        num_decoder_points=num_decoder_points,
+        nhead=nhead,
+        num_decoder_layers=num_decoder_layers,
+        dim_feedforward=dim_feedforward,
+        dropout=dropout,
+        activation=activation,
+        num_denoising=num_denoising,
+        label_noise_ratio=label_noise_ratio,
+        box_noise_scale=box_noise_scale,
+        learnt_init_query=learnt_init_query,
+        eval_spatial_size=eval_spatial_size,  # TODO: pass eval_spatial_size if needed
+        eval_idx=eval_idx,
+        eps=eps,
+        aux_loss=aux_loss,
+    )

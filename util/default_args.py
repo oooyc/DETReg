@@ -31,6 +31,17 @@ default_settings = {
         'num_queries': 300,
         'set_cost_class': 1,
         'cls_loss_coef': 1
+    },
+    'rt_detr': {
+        'lr': 1e-4,
+        'lr_backbone': 1e-5,
+        'epochs': 60,
+        'lr_drop': 40,
+        'dim_feedforward': 2048,
+        'num_queries': 300,
+        'set_cost_class': 2,
+        'vfl_loss_coef': 1,
+        # 'cls_loss_coef': 1
     }
 }
 
@@ -46,7 +57,7 @@ def set_model_defaults(args):
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Deformable DETR Detector', add_help=False)
-    parser.add_argument('--model', default='deformable_detr', type=str, choices=['detr', 'deformable_detr', 'dab_detr'])
+    parser.add_argument('--model', default='deformable_detr', type=str, choices=['detr', 'deformable_detr', 'dab_detr', 'rt_detr'])
     parser.add_argument('--lr', type=float)
     parser.add_argument('--max_prop', default=30, type=int)
     parser.add_argument('--lr_backbone_names', default=["backbone.0"], type=str, nargs='+')
@@ -131,6 +142,7 @@ def get_args_parser():
     parser.add_argument('--bbox_loss_coef', default=5, type=float)
     parser.add_argument('--giou_loss_coef', default=2, type=float)
     parser.add_argument('--focal_alpha', default=0.25, type=float)
+    parser.add_argument('--vfl_loss_coef', default=1, type=float)
 
     # dataset parameters
     parser.add_argument('--dataset_file', default='coco')

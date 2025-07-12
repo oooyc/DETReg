@@ -176,3 +176,5 @@ def build_swav_backbone_old(args, device):
         return model(elem)['0'].mean(dim=(2,3))
     return model_func
 
+
+

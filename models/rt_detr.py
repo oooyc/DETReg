@@ -13,18 +13,40 @@ import torchvision
 from .box_ops import box_cxcywh_to_xyxy, box_iou, generalized_box_iou
 from .dist import get_world_size, is_dist_available_and_initialized
 
+class MLP(nn.Module):
+    """ Very simple multi-layer perceptron (also called FFN)"""
 
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
+        super().__init__()
+        self.num_layers = num_layers
+        h = [hidden_dim] * (num_layers - 1)
+        self.layers = nn.ModuleList(nn.Linear(n, k) for n, k in zip([input_dim] + h, h + [output_dim]))
 
-@register
+    def forward(self, x):
+        for i, layer in enumerate(self.layers):
+            x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
+        return x
+
 class RTDETR(nn.Module):
     __inject__ = ['backbone', 'encoder', 'decoder', ]
 
-    def __init__(self, backbone: nn.Module, encoder, decoder, multi_scale=None):
+    def __init__(self, backbone: nn.Module, encoder, decoder,
+            object_embedding_loss=False,
+            obj_embedding_head=None,
+            hidden_dim=256,
+            multi_scale=None):
         super().__init__()
         self.backbone = backbone
         self.decoder = decoder
         self.encoder = encoder
         self.multi_scale = multi_scale
+        self.object_embedding_loss = object_embedding_loss
+        if self.object_embedding_loss:
+            if obj_embedding_head == 'intermediate':
+                last_channel_size = 2*hidden_dim
+            elif obj_embedding_head == 'head':
+                last_channel_size = hidden_dim//2
+            self.feature_embed = MLP(hidden_dim, hidden_dim, last_channel_size, 2)
         
     def forward(self, x, targets=None):
         if self.multi_scale and self.training:
@@ -33,8 +55,11 @@ class RTDETR(nn.Module):
             
         x = self.backbone(x)
         x = self.encoder(x)        
-        x = self.decoder(x, targets)
+        x, last_hs = self.decoder(x, targets)
 
+        if self.object_embedding_loss:
+            x['pred_features'] = self.feature_embed(last_hs)
+        
         return x
     
     def deploy(self, ):
@@ -51,73 +76,6 @@ mscoco_category2name = {
 mscoco_category2label = {k: i for i, k in enumerate(mscoco_category2name.keys())}
 mscoco_label2category = {v: k for k, v in mscoco_category2label.items()}
 
-class RTDETRPostProcessor(nn.Module):
-    __share__ = ['num_classes', 'use_focal_loss', 'num_top_queries', 'remap_mscoco_category']
-    
-    def __init__(self, num_classes=1, use_focal_loss=True, num_top_queries=300, remap_mscoco_category=False) -> None:
-        super().__init__()
-        self.use_focal_loss = use_focal_loss
-        self.num_top_queries = num_top_queries
-        self.num_classes = num_classes
-        self.remap_mscoco_category = remap_mscoco_category 
-        self.deploy_mode = False 
-
-    def extra_repr(self) -> str:
-        return f'use_focal_loss={self.use_focal_loss}, num_classes={self.num_classes}, num_top_queries={self.num_top_queries}'
-    
-    # def forward(self, outputs, orig_target_sizes):
-    def forward(self, outputs, orig_target_sizes):
-
-        logits, boxes = outputs['pred_logits'], outputs['pred_boxes']
-        # orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)        
-
-        bbox_pred = torchvision.ops.box_convert(boxes, in_fmt='cxcywh', out_fmt='xyxy')
-        bbox_pred *= orig_target_sizes.repeat(1, 2).unsqueeze(1)
-
-        if self.use_focal_loss:
-            scores = F.sigmoid(logits)
-            scores, index = torch.topk(scores.flatten(1), self.num_top_queries, axis=-1)
-            labels = index % self.num_classes
-            index = index // self.num_classes
-            boxes = bbox_pred.gather(dim=1, index=index.unsqueeze(-1).repeat(1, 1, bbox_pred.shape[-1]))
-            
-        else:
-            scores = F.softmax(logits)[:, :, :-1]
-            scores, labels = scores.max(dim=-1)
-            boxes = bbox_pred
-            if scores.shape[1] > self.num_top_queries:
-                scores, index = torch.topk(scores, self.num_top_queries, dim=-1)
-                labels = torch.gather(labels, dim=1, index=index)
-                boxes = torch.gather(boxes, dim=1, index=index.unsqueeze(-1).tile(1, 1, boxes.shape[-1]))
-
-        # TODO for onnx export
-        if self.deploy_mode:
-            return labels, boxes, scores
-
-        # TODO
-        if self.remap_mscoco_category:
-            # from ...data.coco import mscoco_label2category
-            labels = torch.tensor([mscoco_label2category[int(x.item())] for x in labels.flatten()])\
-                .to(boxes.device).reshape(labels.shape)
-
-        results = []
-        for lab, box, sco in zip(labels, boxes, scores):
-            result = dict(labels=lab, boxes=box, scores=sco)
-            results.append(result)
-        
-        return results
-        
-
-    def deploy(self, ):
-        self.eval()
-        self.deploy_mode = True
-        return self 
-
-    @property
-    def iou_types(self, ):
-        return ('bbox', )
-
-
 
 class SetCriterion(nn.Module):
     """ This class computes the loss for DETR.
@@ -128,7 +86,8 @@ class SetCriterion(nn.Module):
     __share__ = ['num_classes', ]
     __inject__ = ['matcher', ]
 
-    def __init__(self, matcher, weight_dict, losses, alpha=0.2, gamma=2.0, eos_coef=1e-4, num_classes=80):
+    def __init__(self, matcher, weight_dict, losses, alpha=0.75, gamma=2.0, eos_coef=1e-4, num_classes=80
+                 ,object_embedding_loss=None):
         """ Create the criterion.
         Parameters:
             num_classes: number of object categories, omitting the special no-object category
@@ -149,7 +108,7 @@ class SetCriterion(nn.Module):
 
         self.alpha = alpha
         self.gamma = gamma
-
+        self.object_embedding_loss = object_embedding_loss
 
     def loss_labels(self, outputs, targets, indices, num_boxes, log=True):
         """Classification loss (NLL)
@@ -171,6 +130,20 @@ class SetCriterion(nn.Module):
             # TODO this should probably be a separate loss, not hacked in this one here
             losses['class_error'] = 100 - accuracy(src_logits[idx], target_classes_o)[0]
         return losses
+
+    def loss_object_embedding(self, outputs, targets, indices, num_boxes):
+        """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
+           targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
+           The target boxes are expected in format (center_x, center_y, h, w), normalized by the image size.
+        """
+        assert 'pred_boxes' in outputs
+        idx = self._get_src_permutation_idx(indices)
+        src_features = outputs['pred_features'][idx]
+        tgt_idx = self._get_tgt_permutation_idx(indices)
+        target_features = [t['patches'] for t in targets]
+        target_features = torch.stack([target_features[i][j] for i,j in zip(tgt_idx[0], tgt_idx[1])], dim=0)
+        return {'loss_object_embedding': torch.nn.functional.l1_loss(src_features, target_features, reduction='mean')}
+
 
     def loss_labels_bce(self, outputs, targets, indices, num_boxes, log=True):
         src_logits = outputs['pred_logits']
@@ -294,6 +267,7 @@ class SetCriterion(nn.Module):
             'bce': self.loss_labels_bce,
             'focal': self.loss_labels_focal,
             'vfl': self.loss_labels_vfl,
+            'object_embedding': self.loss_object_embedding,
         }
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
         return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
@@ -331,6 +305,8 @@ class SetCriterion(nn.Module):
                 for loss in self.losses:
                     if loss == 'masks':
                         # Intermediate masks losses are too costly to compute, we ignore them.
+                        continue
+                    if loss == 'object_embedding':
                         continue
                     kwargs = {}
                     if loss == 'labels':
@@ -389,6 +365,71 @@ class SetCriterion(nn.Module):
 
 
 
+class RTDETRPostProcessor(nn.Module):
+    __share__ = ['num_classes', 'use_focal_loss', 'num_top_queries', 'remap_mscoco_category']
+    
+    def __init__(self, num_classes=2, use_focal_loss=True, num_top_queries=300, remap_mscoco_category=False) -> None:
+        super().__init__()
+        self.use_focal_loss = use_focal_loss
+        self.num_top_queries = num_top_queries
+        self.num_classes = num_classes
+        self.remap_mscoco_category = remap_mscoco_category 
+        self.deploy_mode = False 
+
+    def extra_repr(self) -> str:
+        return f'use_focal_loss={self.use_focal_loss}, num_classes={self.num_classes}, num_top_queries={self.num_top_queries}'
+    
+    # def forward(self, outputs, orig_target_sizes):
+    def forward(self, outputs, orig_target_sizes):
+
+        logits, boxes = outputs['pred_logits'], outputs['pred_boxes']
+        # orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)        
+
+        bbox_pred = torchvision.ops.box_convert(boxes, in_fmt='cxcywh', out_fmt='xyxy')
+        bbox_pred *= orig_target_sizes.repeat(1, 2).unsqueeze(1)
+
+        if self.use_focal_loss:
+            scores = F.sigmoid(logits)
+            scores, index = torch.topk(scores.flatten(1), self.num_top_queries, axis=-1)
+            labels = index % self.num_classes
+            index = index // self.num_classes
+            boxes = bbox_pred.gather(dim=1, index=index.unsqueeze(-1).repeat(1, 1, bbox_pred.shape[-1]))
+            
+        else:
+            scores = F.softmax(logits)[:, :, :-1]
+            scores, labels = scores.max(dim=-1)
+            boxes = bbox_pred
+            if scores.shape[1] > self.num_top_queries:
+                scores, index = torch.topk(scores, self.num_top_queries, dim=-1)
+                labels = torch.gather(labels, dim=1, index=index)
+                boxes = torch.gather(boxes, dim=1, index=index.unsqueeze(-1).tile(1, 1, boxes.shape[-1]))
+
+        # TODO for onnx export
+        if self.deploy_mode:
+            return labels, boxes, scores
+
+        # TODO
+        if self.remap_mscoco_category:
+            # from ...data.coco import mscoco_label2category
+            labels = torch.tensor([mscoco_label2category[int(x.item())] for x in labels.flatten()])\
+                .to(boxes.device).reshape(labels.shape)
+
+        results = []
+        for lab, box, sco in zip(labels, boxes, scores):
+            result = dict(labels=lab, boxes=box, scores=sco)
+            results.append(result)
+        
+        return results
+        
+
+    def deploy(self, ):
+        self.eval()
+        self.deploy_mode = True
+        return self 
+
+    @property
+    def iou_types(self, ):
+        return ('bbox', )
 
 
 @torch.no_grad()

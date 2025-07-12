@@ -56,7 +56,7 @@ def main(args):
     random.seed(seed)
     print(f"Using random seed: {seed}")
     swav_model = None
-    if args.dataset in PRETRAINING_DATASETS:
+    if args.dataset in PRETRAINING_DATASETS and args.model != "rt_detr":
         if args.obj_embedding_head == 'head':
             swav_model = build_swav_backbone(args, device)
         elif args.obj_embedding_head == 'intermediate':

@@ -48,6 +48,10 @@ def train_one_epoch(model: torch.nn.Module, swav_model: torch.nn.Module, criteri
             with torch.no_grad():
                 for elem in targets:
                     elem['patches'] = swav_model(elem['patches'])
+        if model.__class__.__name__ == 'RTDETR':
+            with torch.no_grad():
+                for elem in targets:
+                    elem['patches'] = model.backbone(elem['patches'])['0'].mean(dim=(2,3))
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)

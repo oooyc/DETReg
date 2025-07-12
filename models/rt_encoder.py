@@ -8,12 +8,6 @@ import torch.nn.functional as F
 
 from .utils import get_activation
 
-from src.core import register
-
-
-__all__ = ['HybridEncoder']
-
-
 
 class ConvNormLayer(nn.Module):
     def __init__(self, ch_in, ch_out, kernel_size, stride, padding=None, bias=False, act=None):
@@ -179,7 +173,6 @@ class TransformerEncoder(nn.Module):
         return output
 
 
-@register
 class HybridEncoder(nn.Module):
     def __init__(self,
                  in_channels=[512, 1024, 2048],
@@ -320,3 +313,36 @@ class HybridEncoder(nn.Module):
             outs.append(out)
 
         return outs
+
+
+def build_encoder(in_channels = [512, 1024, 2048],
+                  feat_strides = [8, 16, 32],
+                  hidden_dim: int = 256,
+                  nhead: int = 8,
+                  dim_feedforward: int = 1024,
+                  dropout: float = 0,
+                  enc_act: str = 'gelu',
+                  use_encoder_idx= [2],
+                  num_encoder_layers: int = 1,
+                  pe_temperature: int = 10000,
+                  expansion: float = 1.0,
+                  depth_mult: float = 1,
+                  act: str = 'silu',
+                  eval_spatial_size = [640, 640]
+                ):
+    return HybridEncoder(
+        in_channels=in_channels,
+        feat_strides=feat_strides,
+        hidden_dim=hidden_dim,
+        nhead=nhead,
+        dim_feedforward=dim_feedforward,
+        dropout=dropout,
+        enc_act=enc_act,
+        use_encoder_idx=use_encoder_idx,
+        num_encoder_layers=num_encoder_layers,
+        pe_temperature=pe_temperature,
+        expansion=expansion,
+        depth_mult=depth_mult,
+        act=act,
+        eval_spatial_size=eval_spatial_size
+    )

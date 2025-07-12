@@ -12,14 +12,18 @@ from .backbone import build_backbone
 from .deformable_detr import DeformableDETR, SetCriterion as DefSetCriterion, PostProcess as DefPostProcess
 from .detr import DETR, SetCriterion as DETRSetCriterion, PostProcess as DETRPostProcess
 from .dab_detr import DABDETR, SetCriterion as DABSetCriterion, PostProcess as DABPostProcess
+from .rt_detr import RTDETR, SetCriterion as RTSetCriterion, RTDETRPostProcessor
 from .def_matcher import build_matcher as build_def_matcher
 from .detr_matcher import build_matcher as build_detr_matcher
 from .dab_matcher import build_matcher as build_dab_matcher
+from .rt_matcher import build_matcher as build_rt_matcher
 from .segmentation import (DETRsegm, PostProcessPanoptic, PostProcessSegm,
                            dice_loss, sigmoid_focal_loss)
 from .deformable_transformer import build_deforamble_transformer
 from .dab_transformer import build_dab_transformer
 from .transformer import build_transformer
+from .rt_encoder import build_encoder
+from .rt_decoder import build_decoder
 
 
 def build_model(args):
@@ -34,8 +38,12 @@ def build_model(args):
     num_classes += 1
     device = torch.device(args.device)
 
-    weight_dict = {'loss_ce': args.cls_loss_coef, 'loss_bbox': args.bbox_loss_coef,
+    weight_dict = {'loss_bbox': args.bbox_loss_coef,
                    'loss_giou': args.giou_loss_coef}
+    if args.model != 'rt_detr':
+        weight_dict['loss_ce']=args.cls_loss_coef
+    else:
+        weight_dict['loss_vfl'] = args.vfl_loss_coef
     if args.masks:
         weight_dict["loss_mask"] = args.mask_loss_coef
         weight_dict["loss_dice"] = args.dice_loss_coef
@@ -52,7 +60,11 @@ def build_model(args):
                 {k + f'_enc': v for k, v in weight_dict.items()})
         weight_dict.update(aux_weight_dict)
 
-    losses = ['labels', 'boxes', 'cardinality']
+    losses = ['boxes', 'cardinality']
+    if args.model != 'rt_detr':
+        losses.append('labels')
+    else:
+        losses.append('vfl')
     if args.object_embedding_loss:
         losses.append('object_embedding')
         weight_dict['loss_object_embedding'] = args.object_embedding_coef
@@ -60,7 +72,9 @@ def build_model(args):
     if args.masks:
         losses += ["masks"]
 
-    backbone = build_backbone(args)
+    
+    if args.model != 'rt_detr':
+        backbone = build_backbone(args)
 
     if args.model == 'deformable_detr':
         transformer = build_deforamble_transformer(args)
@@ -109,7 +123,24 @@ def build_model(args):
         matcher = build_dab_matcher(args)
         criterion = DABSetCriterion(num_classes, matcher, weight_dict, args.focal_alpha,
                                      losses, object_embedding_loss=args.object_embedding_loss)
-        postprocessors = {'bbox': DABPostProcess()}
+        postprocessors = {'bbox': DABPostProcess(num_select=300)}
+    elif args.model == 'rt_detr':
+        backbone = build_backbone(args)
+        encoder = build_encoder(args)
+        decoder = build_decoder(args)
+        model = RTDETR(
+            backbone,
+            encoder,
+            decoder,
+            object_embedding_loss=args.object_embedding_loss,
+            obj_embedding_head=args.obj_embedding_head,
+            hidden_dim=args.hidden_dim,
+            multi_scale=[480, 512, 544, 576, 608, 640, 640, 640, 672, 704, 736, 768, 800]
+        )
+        matcher = build_rt_matcher(args)
+        criterion = RTSetCriterion(matcher, weight_dict,losses, eos_coef=args.eos_coef, num_classes=num_classes,
+                                 object_embedding_loss=args.object_embedding_loss)
+        postprocessors = {'bbox': RTDETRPostProcessor(num_classes=num_classes)}
     else:
         raise ValueError("Wrong model.")
 
