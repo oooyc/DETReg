@@ -63,6 +63,8 @@ class DABDETR(nn.Module):
                     query_dim=4, 
                     bbox_embed_diff_each_layer=False,
                     random_refpoints_xy=False,
+                    object_embedding_loss=False, 
+                    obj_embedding_head=None
                     ):
         """ Initializes the model.
         Parameters:
@@ -90,6 +92,14 @@ class DABDETR(nn.Module):
         else:
             self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         
+        self.object_embedding_loss = object_embedding_loss
+        if self.object_embedding_loss:
+            if obj_embedding_head == 'intermediate':
+                last_channel_size = 2*hidden_dim
+            elif obj_embedding_head == 'head':
+                last_channel_size = hidden_dim//2
+            self.feature_embed = MLP(hidden_dim, hidden_dim, last_channel_size, 2)
+
 
         # setting query dim
         self.query_dim = query_dim
@@ -103,7 +113,7 @@ class DABDETR(nn.Module):
             self.refpoint_embed.weight.data[:, :2] = inverse_sigmoid(self.refpoint_embed.weight.data[:, :2])
             self.refpoint_embed.weight.data[:, :2].requires_grad = False
 
-        self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
+        self.input_proj = nn.Conv2d(backbone.num_channels[-1], hidden_dim, kernel_size=1)
         self.backbone = backbone
         self.aux_loss = aux_loss
         self.iter_update = iter_update
@@ -171,10 +181,15 @@ class DABDETR(nn.Module):
                 outputs_coords.append(outputs_coord)
             outputs_coord = torch.stack(outputs_coords)
 
+
         outputs_class = self.class_embed(hs)
         out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
         if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
+
+        if self.object_embedding_loss:
+            out['pred_features'] = self.feature_embed(hs[-1])
+
         return out
 
     @torch.jit.unused
@@ -192,7 +207,7 @@ class SetCriterion(nn.Module):
         1) we compute hungarian assignment between ground truth boxes and the outputs of the model
         2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
     """
-    def __init__(self, num_classes, matcher, weight_dict, focal_alpha, losses):
+    def __init__(self, num_classes, matcher, weight_dict, focal_alpha, losses, object_embedding_loss):
         """ Create the criterion.
         Parameters:
             num_classes: number of object categories, omitting the special no-object category
@@ -207,6 +222,7 @@ class SetCriterion(nn.Module):
         self.weight_dict = weight_dict
         self.losses = losses
         self.focal_alpha = focal_alpha
+        self.object_embedding_loss = object_embedding_loss
         
 
     def loss_labels(self, outputs, targets, indices, num_boxes, log=True):
@@ -234,6 +250,20 @@ class SetCriterion(nn.Module):
             # TODO this should probably be a separate loss, not hacked in this one here
             losses['class_error'] = 100 - accuracy(src_logits[idx], target_classes_o)[0]
         return losses
+    
+    def loss_object_embedding(self, outputs, targets, indices, num_boxes):
+        """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
+           targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
+           The target boxes are expected in format (center_x, center_y, h, w), normalized by the image size.
+        """
+        assert 'pred_boxes' in outputs
+        idx = self._get_src_permutation_idx(indices)
+        src_features = outputs['pred_features'][idx]
+        tgt_idx = self._get_tgt_permutation_idx(indices)
+        target_features = [t['patches'] for t in targets]
+        target_features = torch.stack([target_features[i][j] for i,j in zip(tgt_idx[0], tgt_idx[1])], dim=0)
+        return {'loss_object_embedding': torch.nn.functional.l1_loss(src_features, target_features, reduction='mean')}
+
 
     @torch.no_grad()
     def loss_cardinality(self, outputs, targets, indices, num_boxes):
@@ -323,9 +353,11 @@ class SetCriterion(nn.Module):
             'labels': self.loss_labels,
             'cardinality': self.loss_cardinality,
             'boxes': self.loss_boxes,
-            'masks': self.loss_masks
+            'masks': self.loss_masks,
+            'object_embedding': self.loss_object_embedding
         }
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
+
         return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
 
     def forward(self, outputs, targets, return_indices=False):
@@ -369,6 +401,10 @@ class SetCriterion(nn.Module):
                     if loss == 'masks':
                         # Intermediate masks losses are too costly to compute, we ignore them.
                         continue
+
+                    if loss == 'object_embedding':
+                        continue
+
                     kwargs = {}
                     if loss == 'labels':
                         # Logging is enabled only for the last layer

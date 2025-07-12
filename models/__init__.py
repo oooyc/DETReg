@@ -11,7 +11,7 @@ import torch
 from .backbone import build_backbone
 from .deformable_detr import DeformableDETR, SetCriterion as DefSetCriterion, PostProcess as DefPostProcess
 from .detr import DETR, SetCriterion as DETRSetCriterion, PostProcess as DETRPostProcess
-from .dab_detr import SetCriterion as DABSetCriterion, PostProcess as DABPostProcess
+from .dab_detr import DABDETR, SetCriterion as DABSetCriterion, PostProcess as DABPostProcess
 from .def_matcher import build_matcher as build_def_matcher
 from .detr_matcher import build_matcher as build_detr_matcher
 from .dab_matcher import build_matcher as build_dab_matcher
@@ -24,13 +24,13 @@ from .transformer import build_transformer
 
 def build_model(args):
     if args.dataset_file == 'coco':
-        num_classes = 2
+        num_classes = 1
     elif args.dataset_file == 'coco_panoptic':
-        num_classes = 250
+        num_classes = 1
     elif args.dataset_file == 'airbus':
         num_classes = 1
     else:
-        num_classes = 20
+        num_classes = 1
     num_classes += 1
     device = torch.device(args.device)
 
@@ -94,19 +94,20 @@ def build_model(args):
         criterion = DETRSetCriterion(num_classes, matcher, weight_dict, args.eos_coef,
                                      losses, object_embedding_loss=args.object_embedding_loss)
         postprocessors = {'bbox': DETRPostProcess()}
-    elif args.model == 'dab-detr':
+    elif args.model == 'dab_detr':
         transformer = build_dab_transformer(args)
-        model = DETR(
+        model = DABDETR(
             backbone,
             transformer,
             num_classes=num_classes,
             num_queries=args.num_queries,
+            num_dec_layers=args.dec_layers,
             aux_loss=args.aux_loss,
             object_embedding_loss=args.object_embedding_loss,
             obj_embedding_head=args.obj_embedding_head
         )
         matcher = build_dab_matcher(args)
-        criterion = DABSetCriterion(num_classes, matcher, weight_dict, args.eos_coef,
+        criterion = DABSetCriterion(num_classes, matcher, weight_dict, args.focal_alpha,
                                      losses, object_embedding_loss=args.object_embedding_loss)
         postprocessors = {'bbox': DABPostProcess()}
     else:

@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader
 import datasets
 import util.misc as utils
 import datasets.samplers as samplers
-from datasets import build_dataset, get_coco_api_from_dataset
+# from datasets import build_dataset, get_coco_api_from_dataset
 from engine import evaluate, train_one_epoch, viz
 from models import build_model
 from models.backbone import build_swav_backbone, build_swav_backbone_old
@@ -74,15 +74,15 @@ def main(args):
     if args.distributed:
         if args.cache_mode:
             sampler_train = samplers.NodeDistributedSampler(dataset_train)
-            sampler_val = samplers.NodeDistributedSampler(
-                dataset_val, shuffle=False)
+            # sampler_val = samplers.NodeDistributedSampler(
+            #     dataset_val, shuffle=False)
         else:
             sampler_train = samplers.DistributedSampler(dataset_train)
-            sampler_val = samplers.DistributedSampler(
-                dataset_val, shuffle=False)
+            # sampler_val = samplers.DistributedSampler(
+            #     dataset_val, shuffle=False)
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+        # sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     coco_evaluator = None
     batch_sampler_train = torch.utils.data.BatchSampler(
         sampler_train, args.batch_size, drop_last=True)
@@ -90,9 +90,9 @@ def main(args):
     data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
                                    collate_fn=utils.collate_fn, num_workers=args.num_workers,
                                    pin_memory=True)
-    data_loader_val = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
-                                 drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
-                                 pin_memory=True)
+    # data_loader_val = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
+    #                              drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
+    #                              pin_memory=True)
 
     # lr_backbone_names = ["backbone.0", "backbone.neck", "input_proj", "transformer.encoder"]
     def match_name_keywords(n, name_keywords):
@@ -135,14 +135,14 @@ def main(args):
             model, device_ids=[args.gpu])
         model_without_ddp = model.module
 
-    if args.dataset_file == "coco_panoptic":
-        # We also evaluate AP during panoptic training, on original coco DS
-        coco_val = datasets.coco.build("val", args)
-        base_ds = get_coco_api_from_dataset(coco_val)
-    elif args.dataset_file == "coco" or args.dataset_file == "airbus":
-        base_ds = get_coco_api_from_dataset(dataset_val)
-    else:
-        base_ds = dataset_val
+    # if args.dataset_file == "coco_panoptic":
+    #     # We also evaluate AP during panoptic training, on original coco DS
+    #     coco_val = datasets.coco.build("val", args)
+    #     base_ds = get_coco_api_from_dataset(coco_val)
+    # elif args.dataset_file == "coco" or args.dataset_file == "airbus":
+    #     base_ds = get_coco_api_from_dataset(dataset_val)
+    # else:
+    base_ds = dataset_val
 
     if args.frozen_weights is not None:
         checkpoint = torch.load(args.frozen_weights, map_location='cpu')
@@ -194,23 +194,23 @@ def main(args):
             lr_scheduler.step(lr_scheduler.last_epoch)
             args.start_epoch = checkpoint['epoch'] + 1
         # check the resumed model
-        if (not args.eval and not args.viz and args.dataset in ['coco', 'voc']):
-            test_stats, coco_evaluator = evaluate(
-                model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
-            )
+        # if (not args.eval and not args.viz and args.dataset in ['coco', 'voc']):
+        #     test_stats, coco_evaluator = evaluate(
+        #         model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
+        #     )
 
-    if args.eval:
-        test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,
-                                              data_loader_val, base_ds, device, args.output_dir)
+    # if args.eval:
+    #     test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,
+    #                                           data_loader_val, base_ds, device, args.output_dir)
 
-        if args.output_dir:
-            utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
-        return
+    #     if args.output_dir:
+    #         utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
+    #     return
 
-    if args.viz:
-        viz(model, criterion, postprocessors,
-            data_loader_val, base_ds, device, args.output_dir)
-        return
+    # if args.viz:
+    #     viz(model, criterion, postprocessors,
+    #         data_loader_val, base_ds, device, args.output_dir)
+    #     return
 
     print("Start training")
     start_time = time.time()
@@ -233,10 +233,10 @@ def main(args):
                     'epoch': epoch,
                     'args': args,
                 }, checkpoint_path)
-        if args.dataset in ['coco', 'voc'] and epoch % args.eval_every == 0:
-            test_stats, coco_evaluator = evaluate(
-                model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
-            )
+        # if args.dataset in ['coco', 'voc'] and epoch % args.eval_every == 0:
+        #     test_stats, coco_evaluator = evaluate(
+        #         model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
+        #     )
         else:
             test_stats = {}
 
@@ -266,39 +266,39 @@ def main(args):
 
 
 def get_datasets(args):
-    if args.dataset == 'coco':
-        dataset_train = build_dataset(image_set='train', args=args)
-        dataset_val = build_dataset(image_set='val', args=args)
-    elif args.dataset == 'coco_pretrain':
+    # if args.dataset == 'coco':
+    #     dataset_train = build_dataset(image_set='train', args=args)
+    #     dataset_val = build_dataset(image_set='val', args=args)
+    # elif args.dataset == 'coco_pretrain':
+    #     from datasets.selfdet import build_selfdet
+    #     dataset_train = build_selfdet(
+    #         'train', args=args, p=os.path.join(args.coco_path, 'train2017'))
+    #     dataset_val = build_dataset(image_set='val', args=args)
+    # elif args.dataset == 'airbus':
+    #     dataset_train = build_dataset(image_set='train', args=args)
+    #     dataset_val = build_dataset(image_set='val', args=args)
+    # elif args.dataset == 'airbus_pretrain':
+    #     from datasets.selfdet import build_selfdet
+    #     dataset_train = build_selfdet(
+    #         'train', args=args, p=os.path.join(args.airbus_path, 'train_v2'))
+    #     dataset_val = build_dataset(image_set='val', args=args)
+    if args.dataset == 'imagenet':
         from datasets.selfdet import build_selfdet
         dataset_train = build_selfdet(
-            'train', args=args, p=os.path.join(args.coco_path, 'train2017'))
-        dataset_val = build_dataset(image_set='val', args=args)
-    elif args.dataset == 'airbus':
-        dataset_train = build_dataset(image_set='train', args=args)
-        dataset_val = build_dataset(image_set='val', args=args)
-    elif args.dataset == 'airbus_pretrain':
-        from datasets.selfdet import build_selfdet
-        dataset_train = build_selfdet(
-            'train', args=args, p=os.path.join(args.airbus_path, 'train_v2'))
-        dataset_val = build_dataset(image_set='val', args=args)
-    elif args.dataset == 'imagenet':
-        from datasets.selfdet import build_selfdet
-        dataset_train = build_selfdet(
-            'train', args=args, p=os.path.join(args.imagenet_path, 'train'))
-        dataset_val = build_dataset(image_set='val', args=args)
-    elif args.dataset == 'imagenet100':
-        from datasets.selfdet import build_selfdet
-        dataset_train = build_selfdet(
-            'train', args=args, p=os.path.join(args.imagenet100_path, 'train'))
-        dataset_val = build_dataset(image_set='val', args=args)
-    elif args.dataset == 'voc':
-        from datasets.torchvision_datasets.voc import VOCDetection
-        from datasets.coco import make_coco_transforms
-        dataset_train = VOCDetection(args.voc_path, ["2007", "2012"], image_sets=['trainval', 'trainval'],
-                                     transforms=make_coco_transforms('train'), filter_pct=args.filter_pct, seed=args.seed)
-        dataset_val = VOCDetection(args.voc_path, ["2007"], image_sets=[
-                                   'test'], transforms=make_coco_transforms('val'), seed=args.seed)
+            'train', args=args, p=args.imagenet_path)
+        dataset_val = None
+    # elif args.dataset == 'imagenet100':
+    #     from datasets.selfdet import build_selfdet
+    #     dataset_train = build_selfdet(
+    #         'train', args=args, p=os.path.join(args.imagenet100_path, 'train'))
+    #     dataset_val = build_dataset(image_set='val', args=args)
+    # elif args.dataset == 'voc':
+    #     from datasets.torchvision_datasets.voc import VOCDetection
+    #     from datasets.coco import make_coco_transforms
+    #     dataset_train = VOCDetection(args.voc_path, ["2007", "2012"], image_sets=['trainval', 'trainval'],
+    #                                  transforms=make_coco_transforms('train'), filter_pct=args.filter_pct, seed=args.seed)
+    #     dataset_val = VOCDetection(args.voc_path, ["2007"], image_sets=[
+    #                                'test'], transforms=make_coco_transforms('val'), seed=args.seed)
     else:
         raise ValueError(f"Wrong dataset name: {args.dataset}")
 
@@ -308,7 +308,7 @@ def get_datasets(args):
 def set_dataset_path(args):
     args.coco_path = os.path.join(args.data_root, 'MSCoco')
     args.airbus_path = os.path.join(args.data_root, 'airbus-ship-detection')
-    args.imagenet_path = os.path.join(args.data_root, 'ilsvrc')
+    args.imagenet_path = '/root/fssd/miniImageNet'
     args.imagenet100_path = os.path.join(args.data_root, 'ilsvrc100')
     args.voc_path = os.path.join(args.data_root, 'pascal')
 

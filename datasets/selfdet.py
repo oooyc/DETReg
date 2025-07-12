@@ -43,7 +43,7 @@ class SelfDet(Dataset):
     The format of the bounding box is same to COCO.
     """
 
-    def __init__(self, root, detection_transform, query_transform, cache_dir='/fssd/cache_dir', max_prop=30, strategy='topk'):
+    def __init__(self, root, detection_transform, query_transform, cache_dir='/fssd/miniImageNet_ss_npy', max_prop=30, strategy='topk'):
         super(SelfDet, self).__init__()
         self.strategy = strategy
         self.cache_dir = cache_dir

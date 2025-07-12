@@ -468,8 +468,8 @@ def build_dab_transformer(args):
         normalize_before=args.pre_norm,
         return_intermediate_dec=True,
         query_dim=4,
-        activation=args.transformer_activation,
-        num_patterns=args.num_patterns,
+        activation='prelu',
+        num_patterns=0,
     )
 
 

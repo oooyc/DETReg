@@ -21,6 +21,16 @@ default_settings = {
         'num_queries': 100,
         'set_cost_class': 1,
         'cls_loss_coef': 1
+    },
+    'dab_detr': {
+        'lr': 1e-4,
+        'lr_backbone': 1e-5,
+        'epochs': 60,
+        'lr_drop': 40,
+        'dim_feedforward': 2048,
+        'num_queries': 300,
+        'set_cost_class': 1,
+        'cls_loss_coef': 1
     }
 }
 
@@ -36,7 +46,7 @@ def set_model_defaults(args):
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Deformable DETR Detector', add_help=False)
-    parser.add_argument('--model', default='deformable_detr', type=str, choices=['detr', 'deformable_detr'])
+    parser.add_argument('--model', default='deformable_detr', type=str, choices=['detr', 'deformable_detr', 'dab_detr'])
     parser.add_argument('--lr', type=float)
     parser.add_argument('--max_prop', default=30, type=int)
     parser.add_argument('--lr_backbone_names', default=["backbone.0"], type=str, nargs='+')
@@ -131,7 +141,7 @@ def get_args_parser():
 
     parser.add_argument('--output_dir', default='',
                         help='path where to save, empty for no saving')
-    parser.add_argument('--cache_path', default=None, help='where to store the cache')
+    parser.add_argument('--cache_path', default='/root/fssd/miniImageNet_ss_npy', help='where to store the cache')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
