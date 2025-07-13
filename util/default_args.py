@@ -37,7 +37,7 @@ default_settings = {
         'lr_backbone': 1e-5,
         'epochs': 60,
         'lr_drop': 40,
-        'dim_feedforward': 2048,
+        'dim_feedforward': 1024,
         'num_queries': 300,
         'set_cost_class': 2,
         'vfl_loss_coef': 1,
