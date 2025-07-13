@@ -86,10 +86,14 @@ def main(args):
     coco_evaluator = None
     batch_sampler_train = torch.utils.data.BatchSampler(
         sampler_train, args.batch_size, drop_last=True)
-
-    data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
-                                   collate_fn=utils.collate_fn, num_workers=args.num_workers,
-                                   pin_memory=True)
+    if args.model != 'rt_detr':
+        data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
+                                    collate_fn=utils.collate_fn, num_workers=args.num_workers,
+                                    pin_memory=True)
+    else:
+        data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
+                            collate_fn=utils.RT_collate_fn, num_workers=args.num_workers,
+                            pin_memory=True)
     # data_loader_val = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
     #                              drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers,
     #                              pin_memory=True)
@@ -135,6 +139,8 @@ def main(args):
             model, device_ids=[args.gpu])
         model_without_ddp = model.module
 
+    # for i, (name, param) in enumerate(model.named_parameters()):
+    #     print(f"{i}: {name} - {param.shape}")
     # if args.dataset_file == "coco_panoptic":
     #     # We also evaluate AP during panoptic training, on original coco DS
     #     coco_val = datasets.coco.build("val", args)
@@ -218,7 +224,7 @@ def main(args):
         if args.distributed:
             sampler_train.set_epoch(epoch)
         train_stats = train_one_epoch(
-            model, swav_model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm)
+            model, swav_model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm, model_name=args.model)
         lr_scheduler.step()
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']

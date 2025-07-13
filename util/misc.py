@@ -279,6 +279,10 @@ def collate_fn(batch):
     batch[0] = nested_tensor_from_tensor_list(batch[0])
     return tuple(batch)
 
+def RT_collate_fn(batch):
+    batch = list(zip(*batch))
+    batch[0] = torch.stack(batch[0],dim=0)
+    return tuple(batch)
 
 def _max_by_axis(the_list):
     # type: (List[List[int]]) -> List[int]

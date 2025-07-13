@@ -106,6 +106,6 @@ class HungarianMatcher(nn.Module):
 
 def build_matcher(args):
     return HungarianMatcher(
-        cost_class=args.set_cost_class, cost_bbox=args.set_cost_bbox, cost_giou=args.set_cost_giou,
+        {'cost_class': args.set_cost_class, 'cost_bbox': args.set_cost_bbox, 'cost_giou': args.set_cost_giou},
         use_focal_loss=True
     )

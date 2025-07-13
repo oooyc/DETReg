@@ -28,12 +28,13 @@ from matplotlib import pyplot as plt
 
 def train_one_epoch(model: torch.nn.Module, swav_model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
-                    device: torch.device, epoch: int, max_norm: float = 0):
+                    device: torch.device, epoch: int, max_norm: float = 0, model_name='detr'):
     model.train()
     criterion.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    metric_logger.add_meter('class_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    if model_name != 'rt_detr':
+        metric_logger.add_meter('class_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     metric_logger.add_meter('grad_norm', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
@@ -43,23 +44,28 @@ def train_one_epoch(model: torch.nn.Module, swav_model: torch.nn.Module, criteri
 
     # for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
     for _ in metric_logger.log_every(range(len(data_loader)), print_freq, header):
-        outputs = model(samples)
+        if model_name == 'rt_detr':
+            outputs = model(samples,targets)
+        else:
+            outputs = model(samples)
         if swav_model is not None:
             with torch.no_grad():
                 for elem in targets:
                     elem['patches'] = swav_model(elem['patches'])
-        if model.__class__.__name__ == 'RTDETR':
+        if model_name == 'rt_detr':
             with torch.no_grad():
                 for elem in targets:
-                    elem['patches'] = model.backbone(elem['patches'])['0'].mean(dim=(2,3))
+                    elem['patches'] = model.module.backbone(elem['patches'])[0].mean(dim=(2,3))
         loss_dict = criterion(outputs, targets)
+        # print(loss_dict)
         weight_dict = criterion.weight_dict
+        # print(criterion.weight_dict)
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = utils.reduce_dict(loss_dict)
-        loss_dict_reduced_unscaled = {f'{k}_unscaled': v
-                                      for k, v in loss_dict_reduced.items()}
+        # loss_dict_reduced_unscaled = {f'{k}_unscaled': v
+        #                               for k, v in loss_dict_reduced.items()}
         loss_dict_reduced_scaled = {k: v * weight_dict[k]
                                     for k, v in loss_dict_reduced.items() if k in weight_dict}
         losses_reduced_scaled = sum(loss_dict_reduced_scaled.values())
@@ -79,8 +85,9 @@ def train_one_epoch(model: torch.nn.Module, swav_model: torch.nn.Module, criteri
             grad_total_norm = utils.get_total_grad_norm(model.parameters(), max_norm)
         optimizer.step()
 
-        metric_logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
-        metric_logger.update(class_error=loss_dict_reduced['class_error'])
+        metric_logger.update(loss=loss_value, **loss_dict_reduced_scaled)#, **loss_dict_reduced_unscaled)
+        if 'class_error' in loss_dict_reduced:
+            metric_logger.update(class_error=loss_dict_reduced['class_error'])
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(grad_norm=grad_total_norm)
 

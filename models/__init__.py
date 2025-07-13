@@ -24,6 +24,7 @@ from .dab_transformer import build_dab_transformer
 from .transformer import build_transformer
 from .rt_encoder import build_encoder
 from .rt_decoder import build_decoder
+from .PResNet import build_backbone as build_rt_backbone
 
 
 def build_model(args):
@@ -53,6 +54,14 @@ def build_model(args):
         for i in range(args.dec_layers - 1):
             aux_weight_dict.update(
                 {k + f'_{i}': v for k, v in weight_dict.items()})
+            if args.model == 'rt_detr':
+                aux_weight_dict.update(
+                    {k + f'_dn_{i}': v for k, v in weight_dict.items()})
+        if args.model == 'rt_detr':
+            aux_weight_dict.update(
+                {k + f'_{args.dec_layers - 1}': v for k, v in weight_dict.items()})
+            aux_weight_dict.update(
+                {k + f'_dn_{args.dec_layers - 1}': v for k, v in weight_dict.items()})
 
         # only in def detr impl.
         if args.model == 'deformable_detr':
@@ -125,9 +134,9 @@ def build_model(args):
                                      losses, object_embedding_loss=args.object_embedding_loss)
         postprocessors = {'bbox': DABPostProcess(num_select=300)}
     elif args.model == 'rt_detr':
-        backbone = build_backbone(args)
-        encoder = build_encoder(args)
-        decoder = build_decoder(args)
+        backbone = build_rt_backbone()
+        encoder = build_encoder()
+        decoder = build_decoder()
         model = RTDETR(
             backbone,
             encoder,
@@ -138,7 +147,7 @@ def build_model(args):
             multi_scale=[480, 512, 544, 576, 608, 640, 640, 640, 672, 704, 736, 768, 800]
         )
         matcher = build_rt_matcher(args)
-        criterion = RTSetCriterion(matcher, weight_dict,losses, eos_coef=args.eos_coef, num_classes=num_classes,
+        criterion = RTSetCriterion(matcher, weight_dict,losses, num_classes=num_classes,
                                  object_embedding_loss=args.object_embedding_loss)
         postprocessors = {'bbox': RTDETRPostProcessor(num_classes=num_classes)}
     else:

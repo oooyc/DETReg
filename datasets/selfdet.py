@@ -145,21 +145,31 @@ def make_self_det_transforms(image_set, model='detr'):
     scales = [320, 336, 352, 368, 400, 416, 432, 448, 464, 480]
 
     if image_set == 'train':
-        transforms_list = [
-            T.RandomHorizontalFlip(),
-            T.RandomSelect(
-                T.RandomResize(scales, max_size=600),
-                T.Compose([
-                    T.RandomResize([400, 500, 600]),
-                    T.RandomSizeCrop(384, 600),
+        if model != 'rt_detr':
+            transforms_list = [
+                T.RandomHorizontalFlip(),
+                T.RandomSelect(
                     T.RandomResize(scales, max_size=600),
-                ])
-            ),
-        ]
-        
+                    T.Compose([
+                        T.RandomResize([400, 500, 600]),
+                        T.RandomSizeCrop(384, 600),
+                        T.RandomResize(scales, max_size=600),
+                    ])
+                ),
+            ]
         # For RT-DETR: add final fixed resize to (640, 640)
-        if model == 'rt_detr':
-            transforms_list.append(T.Resize((640, 640)))
+        else:
+            transforms_list = [
+                T.RandomHorizontalFlip(),
+                T.RandomSelect(
+                    T.Resize([640,640]),
+                    T.Compose([
+                        T.RandomResize([400, 500, 600]),
+                        T.RandomSizeCrop(384, 600),
+                        T.Resize([640,640]),
+                    ])
+                ),
+            ]
 
         transforms_list.append(normalize)
 
