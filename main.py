@@ -241,9 +241,10 @@ def main(args):
             test_stats = {}
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                     **{f'test_{k}': v for k, v in test_stats.items()},
+#**{f'test_{k}': v for k, v in test_stats.items()},
                      'epoch': epoch,
                      'n_parameters': n_parameters}
+
 
         if args.output_dir and utils.is_main_process():
             with (output_dir / "log.txt").open("a") as f:
